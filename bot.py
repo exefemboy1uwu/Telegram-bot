@@ -78,14 +78,18 @@ def download_with_gallerydl(url: str, job_id: str):
         'gallery-dl',
         '--cookies', 'x.com_cookies.txt',
         '--dest', str(output_dir),
-        '--filename', '{num}.{extension}',
         url
     ], capture_output=True, text=True, timeout=180)
 
     logging.info(f"gallery-dl output: {result.stdout}")
     logging.error(f"gallery-dl error: {result.stderr}")
 
-    files = [f for f in output_dir.glob('*') if f.stat().st_size > 0]
+    # ابحث عن الملفات داخل كل المجلدات الفرعية
+    files = []
+    for f in output_dir.rglob('*'):
+        if f.is_file() and f.stat().st_size > 0:
+            files.append(f)
+
     if not files:
         return None
 
@@ -129,7 +133,7 @@ def compress_video(input_path: str, max_size_mb: int = 45):
 
 # ===== التحميل الرئيسي =====
 def download_media(url: str, job_id: str):
-    # Pinterest → gallery-dl أولاً (يدعم pin.it)
+    # Pinterest → gallery-dl أولاً
     if 'pin.it' in url.lower() or 'pinterest' in url.lower():
         try:
             filepath = download_with_gallerydl(url, job_id)
