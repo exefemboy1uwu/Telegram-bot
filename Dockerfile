@@ -6,9 +6,9 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade yt-dlp
 
 COPY bot.py .
 COPY x.com_cookies.txt .
-COPY youtube.com_cookies.txt .
 
 CMD ["python", "bot.py"]
