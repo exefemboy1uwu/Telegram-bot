@@ -35,14 +35,29 @@ URL_REGEX = re.compile(
     re.IGNORECASE
 )
 
+
 def extract_url(text: str):
     match = URL_REGEX.search(text)
-    return match.group(0) if match else None
+    if not match:
+        return None
+    url = match.group(0)
+
+    # نظّف روابط يوتيوب
+    if 'youtu' in url.lower():
+        # احذف معامل si=
+        url = re.sub(r'[?&]si=[^&]*', '', url)
+        # احذف معاملات تتبع أخرى
+        url = re.sub(r'[?&]pp=[^&]*', '', url)
+        url = re.sub(r'[?&]feature=[^&]*', '', url)
+        url = url.rstrip('?&')
+
+    return url
 
 
 # ===== التحميل عبر yt-dlp =====
 def download_with_ytdlp(url: str, job_id: str):
     output_template = str(DOWNLOAD_DIR / f"{job_id}.%(ext)s")
+
     ydl_opts = {
         'outtmpl': output_template,
         'format': 'bestvideo+bestaudio/best',
@@ -56,16 +71,29 @@ def download_with_ytdlp(url: str, job_id: str):
                           'AppleWebKit/537.36 (KHTML, like Gecko) '
                           'Chrome/120.0 Safari/537.36'
         },
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+                'skip': ['hls', 'dash'],
+            }
+        },
+        'retries': 3,
+        'fragment_retries': 3,
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filepath = ydl.prepare_filename(info)
+
+        # إذا لم يوجد الملف بالاسم المتوقع، ابحث عن أي ملف مطابق
         if not os.path.exists(filepath):
             base = os.path.splitext(filepath)[0]
-            for ext in ['.mp4', '.mkv', '.webm', '.jpg', '.png', '.jpeg']:
+            for ext in ['.mp4', '.mkv', '.webm', '.mov',
+                        '.jpg', '.jpeg', '.png', '.webp']:
                 if os.path.exists(base + ext):
                     filepath = base + ext
                     break
+
     return filepath
 
 
@@ -84,7 +112,7 @@ def download_with_gallerydl(url: str, job_id: str):
     logging.info(f"gallery-dl output: {result.stdout}")
     logging.error(f"gallery-dl error: {result.stderr}")
 
-    # ابحث عن الملفات داخل كل المجلدات الفرعية
+    # ابحث عن الملفات في كل المجلدات الفرعية
     files = []
     for f in output_dir.rglob('*'):
         if f.is_file() and f.stat().st_size > 0:
@@ -133,6 +161,8 @@ def compress_video(input_path: str, max_size_mb: int = 45):
 
 # ===== التحميل الرئيسي =====
 def download_media(url: str, job_id: str):
+    errors = []
+
     # Pinterest → gallery-dl أولاً
     if 'pin.it' in url.lower() or 'pinterest' in url.lower():
         try:
@@ -143,6 +173,7 @@ def download_media(url: str, job_id: str):
                 )
                 return filepath, is_video
         except Exception as e:
+            errors.append(f"gallery-dl (pinterest): {e}")
             logging.warning(f"gallery-dl (pinterest) failed: {e}")
 
     # 1) جرّب yt-dlp
@@ -151,6 +182,7 @@ def download_media(url: str, job_id: str):
         is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))
         return filepath, is_video
     except Exception as e:
+        errors.append(f"yt-dlp: {e}")
         logging.warning(f"yt-dlp failed: {e}")
 
     # 2) جرّب gallery-dl
@@ -162,9 +194,10 @@ def download_media(url: str, job_id: str):
             )
             return filepath, is_video
     except Exception as e:
+        errors.append(f"gallery-dl: {e}")
         logging.warning(f"gallery-dl failed: {e}")
 
-    raise Exception("فشل التحميل بكل الطرق")
+    raise Exception("فشل التحميل بكل الطرق:\n" + "\n".join(errors[:3]))
 
 
 # ===== الأوامر =====
