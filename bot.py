@@ -52,9 +52,7 @@ def extract_url(text: str):
 
 
 def get_cookie_file(url: str):
-    url_lower = url.lower()
-    if 'youtu' in url_lower:
-        return 'youtube.com_cookies.txt'
+    """يستخدم كوكيز X فقط — يوتيوب يعمل بدون كوكيز"""
     return 'x.com_cookies.txt'
 
 
@@ -77,11 +75,11 @@ def download_with_ytdlp(url: str, job_id: str):
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'web'],
+                'player_client': ['ios', 'web', 'android'],
             }
         },
-        'retries': 3,
-        'fragment_retries': 3,
+        'retries': 5,
+        'fragment_retries': 5,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -106,7 +104,7 @@ def download_with_gallerydl(url: str, job_id: str):
 
     result = subprocess.run([
         'gallery-dl',
-        '--cookies', get_cookie_file(url),
+        '--cookies', 'x.com_cookies.txt',
         '--dest', str(output_dir),
         url
     ], capture_output=True, text=True, timeout=180)
