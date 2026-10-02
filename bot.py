@@ -23,9 +23,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ===== التحقق من الرابط =====
+# ===== التحقق من الرابط (يدعم كل الروابط القصيرة) =====
 URL_REGEX = re.compile(
-    r'https?://(www\.)?'
+    r'https?://([a-zA-Z0-9-]+\.)*'
     r'(twitter\.com|x\.com|instagram\.com|tiktok\.com|'
     r'youtube\.com|youtu\.be|facebook\.com|fb\.watch|'
     r'reddit\.com|pinterest\.com|snapchat\.com|'
@@ -44,7 +44,7 @@ def download_media(url: str, job_id: str):
 
     ydl_opts = {
         'outtmpl': output_template,
-        'format': 'bestvideo+bestaudio/best',  # الجودة الأصلية
+        'format': 'bestvideo+bestaudio/best',
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
