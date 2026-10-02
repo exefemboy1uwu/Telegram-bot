@@ -114,9 +114,9 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if size > MAX_FILE_SIZE:
             await status_msg.edit_text(
                 f"⚠️ حجم الملف كبير ({size // (1024*1024)}MB)\n"
-                "الحد الأقصى 50MB.\n"
-                "جاري إرساله كملف مستند..."
+                "الحد الأقصى 50MB."
             )
+            return
 
         await status_msg.edit_text("📤 جاري الإرسال...")
 
@@ -136,18 +136,20 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
 
     except yt_dlp.utils.DownloadError as e:
+        error_str = str(e)
+        logging.error(f"DOWNLOAD ERROR: {error_str}")
+        # إرسال تفاصيل الخطأ لك
         await status_msg.edit_text(
-            "❌ فشل التحميل.\n"
-            "الأسباب:\n"
-            "• الرابط خاص أو محذوف\n"
-            "• الموقع يطلب تسجيل دخول\n"
-            "• الرابط غير مدعوم"
+            f"❌ فشل التحميل.\n\n"
+            f"تفاصيل الخطأ:\n{error_str[:500]}"
         )
-        logging.error(f"Download error: {e}")
 
     except Exception as e:
-        await status_msg.edit_text("❌ حدث خطأ غير متوقع.")
+        error_str = str(e)
         logging.exception(e)
+        await status_msg.edit_text(
+            f"❌ خطأ غير متوقع:\n{error_str[:500]}"
+        )
 
     finally:
         if filepath and os.path.exists(filepath):
