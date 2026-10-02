@@ -3,6 +3,7 @@ import re
 import uuid
 import asyncio
 import logging
+import subprocess
 from pathlib import Path
 
 from telegram import Update
@@ -16,14 +17,14 @@ import yt_dlp
 TOKEN = os.environ.get("BOT_TOKEN")
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB حد تلقرام
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# ===== التحقق من الرابط (يدعم كل الروابط القصيرة) =====
+# ===== التحقق من الرابط =====
 URL_REGEX = re.compile(
     r'https?://([a-zA-Z0-9-]+\.)*'
     r'(twitter\.com|x\.com|instagram\.com|tiktok\.com|'
@@ -38,10 +39,9 @@ def extract_url(text: str):
     return match.group(0) if match else None
 
 
-# ===== التحميل بالجودة الأصلية =====
-def download_media(url: str, job_id: str):
+# ===== التحميل عبر yt-dlp =====
+def download_with_ytdlp(url: str, job_id: str):
     output_template = str(DOWNLOAD_DIR / f"{job_id}.%(ext)s")
-
     ydl_opts = {
         'outtmpl': output_template,
         'format': 'bestvideo+bestaudio/best',
@@ -56,19 +56,59 @@ def download_media(url: str, job_id: str):
                           'Chrome/120.0 Safari/537.36'
         },
     }
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filepath = ydl.prepare_filename(info)
-
         if not os.path.exists(filepath):
             base = os.path.splitext(filepath)[0]
             for ext in ['.mp4', '.mkv', '.webm', '.jpg', '.png', '.jpeg']:
                 if os.path.exists(base + ext):
                     filepath = base + ext
                     break
+    return filepath
 
-    is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))
+
+# ===== التحميل عبر gallery-dl (للمحتوى المقيّد) =====
+def download_with_gallerydl(url: str, job_id: str):
+    output_dir = DOWNLOAD_DIR / job_id
+    output_dir.mkdir(exist_ok=True)
+
+    result = subprocess.run([
+        'gallery-dl',
+        '--cookies', 'x.com_cookies.txt',
+        '--dest', str(output_dir),
+        '--filename', '{num}.{extension}',
+        url
+    ], capture_output=True, text=True, timeout=180)
+
+    logging.info(f"gallery-dl output: {result.stdout}")
+    logging.error(f"gallery-dl error: {result.stderr}")
+
+    files = list(output_dir.glob('*'))
+    if not files:
+        return None
+
+    # اختر أكبر ملف (الفيديو عادة أكبر)
+    filepath = max(files, key=lambda f: f.stat().st_size)
+    return str(filepath)
+
+
+# ===== التحميل الرئيسي =====
+def download_media(url: str, job_id: str):
+    # جرّب yt-dlp أولاً
+    try:
+        filepath = download_with_ytdlp(url, job_id)
+        is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))
+        return filepath, is_video
+    except Exception as e:
+        logging.warning(f"yt-dlp failed: {e}, trying gallery-dl...")
+
+    # إذا فشل، جرّب gallery-dl
+    filepath = download_with_gallerydl(url, job_id)
+    if not filepath:
+        raise Exception("فشل التحميل بكل الطرق")
+
+    is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.gif'))
     return filepath, is_video
 
 
@@ -93,10 +133,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = extract_url(text)
 
     if not url:
-        await update.message.reply_text(
-            "❌ لم أجد رابطاً مدعوماً.\n"
-            "أرسل رابطاً من المواقع المدعومة."
-        )
+        await update.message.reply_text("❌ لم أجد رابطاً مدعوماً.")
         return
 
     status_msg = await update.message.reply_text("⏳ جاري التحميل...")
@@ -135,28 +172,26 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await status_msg.delete()
 
-    except yt_dlp.utils.DownloadError as e:
+    except Exception as e:
         error_str = str(e)
-        logging.error(f"DOWNLOAD ERROR: {error_str}")
-        # إرسال تفاصيل الخطأ لك
+        logging.exception(e)
         await status_msg.edit_text(
             f"❌ فشل التحميل.\n\n"
             f"تفاصيل الخطأ:\n{error_str[:500]}"
         )
 
-    except Exception as e:
-        error_str = str(e)
-        logging.exception(e)
-        await status_msg.edit_text(
-            f"❌ خطأ غير متوقع:\n{error_str[:500]}"
-        )
-
     finally:
+        # حذف الملفات
         if filepath and os.path.exists(filepath):
             try:
                 os.remove(filepath)
             except OSError:
                 pass
+        # حذف مجلد gallery-dl
+        gallery_dir = DOWNLOAD_DIR / job_id
+        if gallery_dir.exists():
+            import shutil
+            shutil.rmtree(gallery_dir, ignore_errors=True)
 
 
 # ===== التشغيل =====
