@@ -17,17 +17,16 @@ import yt_dlp
 TOKEN = os.environ.get("BOT_TOKEN")
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB حد تلقرام
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# ⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️
-# ✏️ غيّر القيمة التالية إلى اسم الموقع بالإنجليزية (بدون .com)
+# ⬇️⬇️⬇️ استبدل كلمة example فقط ⬇️⬇️⬇️
 SITE_NAME = "pornhub"
-# ⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️
+# ⬆️⬆️⬆️ لا تغير أي شي آخر في هذا السطر ⬆️⬆️⬆️
 
 # ===== التحقق من الرابط =====
 URL_REGEX = re.compile(
@@ -46,7 +45,7 @@ def extract_url(text: str):
     return match.group(0) if match else None
 
 
-# ===== التحميل بالجودة الأصلية =====
+# ===== التحميل عبر yt-dlp =====
 def download_with_ytdlp(url: str, job_id: str):
     output_template = str(DOWNLOAD_DIR / f"{job_id}.%(ext)s")
     ydl_opts = {
@@ -75,6 +74,29 @@ def download_with_ytdlp(url: str, job_id: str):
     return filepath
 
 
+# ===== التحميل عبر you-get =====
+def download_with_youget(url: str, job_id: str):
+    output_dir = DOWNLOAD_DIR / job_id
+    output_dir.mkdir(exist_ok=True)
+
+    result = subprocess.run([
+        'you-get',
+        '-o', str(output_dir),
+        '-O', job_id,
+        url
+    ], capture_output=True, text=True, timeout=300)
+
+    logging.info(f"you-get output: {result.stdout}")
+    logging.error(f"you-get error: {result.stderr}")
+
+    files = [f for f in output_dir.glob('*') if f.stat().st_size > 0]
+    if not files:
+        return None
+
+    filepath = max(files, key=lambda f: f.stat().st_size)
+    return str(filepath)
+
+
 # ===== التحميل عبر gallery-dl =====
 def download_with_gallerydl(url: str, job_id: str):
     output_dir = DOWNLOAD_DIR / job_id
@@ -91,7 +113,7 @@ def download_with_gallerydl(url: str, job_id: str):
     logging.info(f"gallery-dl output: {result.stdout}")
     logging.error(f"gallery-dl error: {result.stderr}")
 
-    files = list(output_dir.glob('*'))
+    files = [f for f in output_dir.glob('*') if f.stat().st_size > 0]
     if not files:
         return None
 
@@ -135,19 +157,33 @@ def compress_video(input_path: str, max_size_mb: int = 45):
 
 # ===== التحميل الرئيسي =====
 def download_media(url: str, job_id: str):
+    # 1) جرّب yt-dlp
     try:
         filepath = download_with_ytdlp(url, job_id)
         is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))
         return filepath, is_video
     except Exception as e:
-        logging.warning(f"yt-dlp failed: {e}, trying gallery-dl...")
+        logging.warning(f"yt-dlp failed: {e}")
 
-    filepath = download_with_gallerydl(url, job_id)
-    if not filepath:
-        raise Exception("فشل التحميل بكل الطرق")
+    # 2) جرّب you-get
+    try:
+        filepath = download_with_youget(url, job_id)
+        if filepath:
+            is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.flv'))
+            return filepath, is_video
+    except Exception as e:
+        logging.warning(f"you-get failed: {e}")
 
-    is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.gif'))
-    return filepath, is_video
+    # 3) جرّب gallery-dl
+    try:
+        filepath = download_with_gallerydl(url, job_id)
+        if filepath:
+            is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.gif'))
+            return filepath, is_video
+    except Exception as e:
+        logging.warning(f"gallery-dl failed: {e}")
+
+    raise Exception("فشل التحميل بكل الطرق")
 
 
 # ===== الأوامر =====
