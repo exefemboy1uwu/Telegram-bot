@@ -24,9 +24,13 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ⬇️⬇️⬇️ استبدل كلمة example فقط ⬇️⬇️⬇️
+# ⬇️⬇️⬇️ المكان 1: استبدل كلمة example باسم الموقع (بحروف صغيرة، بدون .com) ⬇️⬇️⬇️
 SITE_NAME = "pornhub"
-# ⬆️⬆️⬆️ لا تغير أي شي آخر في هذا السطر ⬆️⬆️⬆️
+# ⬆️⬆️⬆️ لا تغير أي شي آخر ⬆️⬆️⬆️
+
+# ⬇️⬇️⬇️ المكان 2: استبدل كلمة MODULE_NAME باسم المكتبة (نفس اسم الموقع بحروف صغيرة) ⬇️⬇️⬇️
+MODULE_NAME = "pornhub"
+# ⬆️⬆️⬆️ لا تغير أي شي آخر ⬆️⬆️⬆️
 
 # ===== التحقق من الرابط =====
 URL_REGEX = re.compile(
@@ -74,22 +78,35 @@ def download_with_ytdlp(url: str, job_id: str):
     return filepath
 
 
-# ===== التحميل عبر you-get =====
-def download_with_youget(url: str, job_id: str):
+# ===== التحميل عبر المكتبة المخصصة =====
+def download_with_custom_module(url: str, job_id: str):
     output_dir = DOWNLOAD_DIR / job_id
     output_dir.mkdir(exist_ok=True)
 
-    result = subprocess.run([
-        'you-get',
-        '-o', str(output_dir),
-        '-O', job_id,
-        url
-    ], capture_output=True, text=True, timeout=300)
+    # سكربت صغير يشغّل المكتبة
+    script = f'''
+import sys
+try:
+    from {MODULE_NAME} import {MODULE_NAME.capitalize()}
+except ImportError:
+    import {MODULE_NAME}
+    {MODULE_NAME.capitalize()} = {MODULE_NAME}.{MODULE_NAME.capitalize()}
 
-    logging.info(f"you-get output: {result.stdout}")
-    logging.error(f"you-get error: {result.stderr}")
+client = {MODULE_NAME.capitalize()}()
+client.download("{url}", output_dir="{output_dir}")
+'''
+    script_path = output_dir / "run.py"
+    script_path.write_text(script)
 
-    files = [f for f in output_dir.glob('*') if f.stat().st_size > 0]
+    result = subprocess.run(
+        ['python', str(script_path)],
+        capture_output=True, text=True, timeout=600
+    )
+
+    logging.info(f"custom module stdout: {result.stdout}")
+    logging.error(f"custom module stderr: {result.stderr}")
+
+    files = [f for f in output_dir.glob('*') if f.is_file() and f.suffix != '.py']
     if not files:
         return None
 
@@ -121,7 +138,7 @@ def download_with_gallerydl(url: str, job_id: str):
     return str(filepath)
 
 
-# ===== ضغط الفيديو إذا كان كبيراً =====
+# ===== ضغط الفيديو =====
 def compress_video(input_path: str, max_size_mb: int = 45):
     output_path = input_path.rsplit('.', 1)[0] + '_compressed.mp4'
 
@@ -157,6 +174,16 @@ def compress_video(input_path: str, max_size_mb: int = 45):
 
 # ===== التحميل الرئيسي =====
 def download_media(url: str, job_id: str):
+    # إذا الرابط من الموقع المخصص
+    if SITE_NAME.lower() in url.lower():
+        try:
+            filepath = download_with_custom_module(url, job_id)
+            if filepath:
+                is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.flv'))
+                return filepath, is_video
+        except Exception as e:
+            logging.warning(f"custom module failed: {e}")
+
     # 1) جرّب yt-dlp
     try:
         filepath = download_with_ytdlp(url, job_id)
@@ -165,16 +192,7 @@ def download_media(url: str, job_id: str):
     except Exception as e:
         logging.warning(f"yt-dlp failed: {e}")
 
-    # 2) جرّب you-get
-    try:
-        filepath = download_with_youget(url, job_id)
-        if filepath:
-            is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.flv'))
-            return filepath, is_video
-    except Exception as e:
-        logging.warning(f"you-get failed: {e}")
-
-    # 3) جرّب gallery-dl
+    # 2) جرّب gallery-dl
     try:
         filepath = download_with_gallerydl(url, job_id)
         if filepath:
