@@ -42,7 +42,6 @@ def extract_url(text: str):
         return None
     url = match.group(0)
 
-    # نظّف روابط يوتيوب من معاملات التتبع
     if 'youtu' in url.lower():
         url = re.sub(r'[?&]si=[^&]*', '', url)
         url = re.sub(r'[?&]pp=[^&]*', '', url)
@@ -53,7 +52,6 @@ def extract_url(text: str):
 
 
 def get_cookie_file(url: str):
-    """يختار ملف الكوكيز المناسب حسب الموقع"""
     url_lower = url.lower()
     if 'youtu' in url_lower:
         return 'youtube.com_cookies.txt'
@@ -66,7 +64,7 @@ def download_with_ytdlp(url: str, job_id: str):
 
     ydl_opts = {
         'outtmpl': output_template,
-        'format': 'bestvideo+bestaudio/best',
+        'format': 'best/bestvideo+bestaudio',
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
@@ -79,7 +77,7 @@ def download_with_ytdlp(url: str, job_id: str):
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
+                'player_client': ['ios', 'web'],
             }
         },
         'retries': 3,
@@ -166,7 +164,6 @@ def compress_video(input_path: str, max_size_mb: int = 45):
 def download_media(url: str, job_id: str):
     errors = []
 
-    # Pinterest → gallery-dl أولاً
     if 'pin.it' in url.lower() or 'pinterest' in url.lower():
         try:
             filepath = download_with_gallerydl(url, job_id)
@@ -179,7 +176,6 @@ def download_media(url: str, job_id: str):
             errors.append(f"gallery-dl (pinterest): {e}")
             logging.warning(f"gallery-dl (pinterest) failed: {e}")
 
-    # 1) جرّب yt-dlp
     try:
         filepath = download_with_ytdlp(url, job_id)
         is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))
@@ -188,7 +184,6 @@ def download_media(url: str, job_id: str):
         errors.append(f"yt-dlp: {e}")
         logging.warning(f"yt-dlp failed: {e}")
 
-    # 2) جرّب gallery-dl
     try:
         filepath = download_with_gallerydl(url, job_id)
         if filepath:
