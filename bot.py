@@ -17,12 +17,17 @@ import yt_dlp
 TOKEN = os.environ.get("BOT_TOKEN")
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
-MAX_FILE_SIZE = 50 * 1024 * 1024
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB حد تلقرام
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+
+# ⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️⬇️
+# ✏️ غيّر القيمة التالية إلى اسم الموقع بالإنجليزية (بدون .com)
+SITE_NAME = "pornhub"
+# ⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️⬆️
 
 # ===== التحقق من الرابط =====
 URL_REGEX = re.compile(
@@ -30,8 +35,10 @@ URL_REGEX = re.compile(
     r'(twitter\.com|x\.com|instagram\.com|tiktok\.com|'
     r'youtube\.com|youtu\.be|facebook\.com|fb\.watch|'
     r'reddit\.com|pinterest\.com|snapchat\.com|'
-    r'tumblr\.com|vimeo\.com|dailymotion\.com)'
-    r'[^\s]*'
+    r'tumblr\.com|vimeo\.com|dailymotion\.com|'
+    + re.escape(SITE_NAME) + r'\.com)'
+    r'[^\s]*',
+    re.IGNORECASE
 )
 
 def extract_url(text: str):
@@ -39,7 +46,7 @@ def extract_url(text: str):
     return match.group(0) if match else None
 
 
-# ===== التحميل عبر yt-dlp =====
+# ===== التحميل بالجودة الأصلية =====
 def download_with_ytdlp(url: str, job_id: str):
     output_template = str(DOWNLOAD_DIR / f"{job_id}.%(ext)s")
     ydl_opts = {
@@ -68,7 +75,7 @@ def download_with_ytdlp(url: str, job_id: str):
     return filepath
 
 
-# ===== التحميل عبر gallery-dl (للمحتوى المقيّد) =====
+# ===== التحميل عبر gallery-dl =====
 def download_with_gallerydl(url: str, job_id: str):
     output_dir = DOWNLOAD_DIR / job_id
     output_dir.mkdir(exist_ok=True)
@@ -88,14 +95,46 @@ def download_with_gallerydl(url: str, job_id: str):
     if not files:
         return None
 
-    # اختر أكبر ملف (الفيديو عادة أكبر)
     filepath = max(files, key=lambda f: f.stat().st_size)
     return str(filepath)
 
 
+# ===== ضغط الفيديو إذا كان كبيراً =====
+def compress_video(input_path: str, max_size_mb: int = 45):
+    output_path = input_path.rsplit('.', 1)[0] + '_compressed.mp4'
+
+    probe = subprocess.run([
+        'ffprobe', '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        input_path
+    ], capture_output=True, text=True)
+
+    try:
+        duration = float(probe.stdout.strip())
+    except (ValueError, AttributeError):
+        duration = 60
+
+    target_bitrate_kbps = int((max_size_mb * 8 * 1024) / duration) - 128
+    if target_bitrate_kbps < 100:
+        target_bitrate_kbps = 100
+
+    subprocess.run([
+        'ffmpeg', '-i', input_path,
+        '-b:v', f'{target_bitrate_kbps}k',
+        '-b:a', '128k',
+        '-vf', 'scale=-2:480',
+        '-preset', 'fast',
+        '-y', output_path
+    ], capture_output=True)
+
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        return output_path
+    return input_path
+
+
 # ===== التحميل الرئيسي =====
 def download_media(url: str, job_id: str):
-    # جرّب yt-dlp أولاً
     try:
         filepath = download_with_ytdlp(url, job_id)
         is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))
@@ -103,7 +142,6 @@ def download_media(url: str, job_id: str):
     except Exception as e:
         logging.warning(f"yt-dlp failed: {e}, trying gallery-dl...")
 
-    # إذا فشل، جرّب gallery-dl
     filepath = download_with_gallerydl(url, job_id)
     if not filepath:
         raise Exception("فشل التحميل بكل الطرق")
@@ -124,7 +162,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• فيسبوك\n"
         "• ريديت\n"
         "• بينتريست\n\n"
-        "وسأحمّلها لك بالجودة الأصلية 📥"
+        "وسأحمّلها لك 📥"
     )
 
 
@@ -148,10 +186,31 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         size = os.path.getsize(filepath)
+        logging.info(f"Downloaded: {filepath} ({size // (1024*1024)}MB)")
+
+        if is_video and size > MAX_FILE_SIZE:
+            await status_msg.edit_text(
+                f"⚠️ الحجم كبير ({size // (1024*1024)}MB)\n"
+                f"🔄 جاري الضغط..."
+            )
+            loop = asyncio.get_event_loop()
+            compressed = await loop.run_in_executor(
+                None, compress_video, filepath, 45
+            )
+            if compressed != filepath and os.path.exists(compressed):
+                os.remove(filepath)
+                filepath = compressed
+                size = os.path.getsize(filepath)
+
+        if not is_video and size > MAX_FILE_SIZE:
+            await status_msg.edit_text(
+                f"⚠️ حجم الصورة كبير ({size // (1024*1024)}MB)"
+            )
+            return
+
         if size > MAX_FILE_SIZE:
             await status_msg.edit_text(
-                f"⚠️ حجم الملف كبير ({size // (1024*1024)}MB)\n"
-                "الحد الأقصى 50MB."
+                f"⚠️ الحجم ما زال كبير ({size // (1024*1024)}MB)"
             )
             return
 
@@ -161,7 +220,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_video:
                 await update.message.reply_video(
                     video=f,
-                    caption="✅ تم التحميل بالجودة الأصلية",
+                    caption="✅ تم التحميل",
                     supports_streaming=True
                 )
             else:
@@ -181,13 +240,11 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     finally:
-        # حذف الملفات
         if filepath and os.path.exists(filepath):
             try:
                 os.remove(filepath)
             except OSError:
                 pass
-        # حذف مجلد gallery-dl
         gallery_dir = DOWNLOAD_DIR / job_id
         if gallery_dir.exists():
             import shutil
