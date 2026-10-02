@@ -24,22 +24,13 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ⬇️⬇️⬇️ المكان 1: استبدل كلمة example باسم الموقع (بحروف صغيرة، بدون .com) ⬇️⬇️⬇️
-SITE_NAME = "pornhub"
-# ⬆️⬆️⬆️ لا تغير أي شي آخر ⬆️⬆️⬆️
-
-# ⬇️⬇️⬇️ المكان 2: استبدل كلمة MODULE_NAME باسم المكتبة (نفس اسم الموقع بحروف صغيرة) ⬇️⬇️⬇️
-MODULE_NAME = "pornhub"
-# ⬆️⬆️⬆️ لا تغير أي شي آخر ⬆️⬆️⬆️
-
 # ===== التحقق من الرابط =====
 URL_REGEX = re.compile(
     r'https?://([a-zA-Z0-9-]+\.)*'
     r'(twitter\.com|x\.com|instagram\.com|tiktok\.com|'
     r'youtube\.com|youtu\.be|facebook\.com|fb\.watch|'
-    r'reddit\.com|pinterest\.com|snapchat\.com|'
-    r'tumblr\.com|vimeo\.com|dailymotion\.com|'
-    + re.escape(SITE_NAME) + r'\.com)'
+    r'reddit\.com|pinterest\.com|pin\.it|snapchat\.com|'
+    r'tumblr\.com|vimeo\.com|dailymotion\.com)'
     r'[^\s]*',
     re.IGNORECASE
 )
@@ -76,42 +67,6 @@ def download_with_ytdlp(url: str, job_id: str):
                     filepath = base + ext
                     break
     return filepath
-
-
-# ===== التحميل عبر المكتبة المخصصة =====
-def download_with_custom_module(url: str, job_id: str):
-    output_dir = DOWNLOAD_DIR / job_id
-    output_dir.mkdir(exist_ok=True)
-
-    # سكربت صغير يشغّل المكتبة
-    script = f'''
-import sys
-try:
-    from {MODULE_NAME} import {MODULE_NAME.capitalize()}
-except ImportError:
-    import {MODULE_NAME}
-    {MODULE_NAME.capitalize()} = {MODULE_NAME}.{MODULE_NAME.capitalize()}
-
-client = {MODULE_NAME.capitalize()}()
-client.download("{url}", output_dir="{output_dir}")
-'''
-    script_path = output_dir / "run.py"
-    script_path.write_text(script)
-
-    result = subprocess.run(
-        ['python', str(script_path)],
-        capture_output=True, text=True, timeout=600
-    )
-
-    logging.info(f"custom module stdout: {result.stdout}")
-    logging.error(f"custom module stderr: {result.stderr}")
-
-    files = [f for f in output_dir.glob('*') if f.is_file() and f.suffix != '.py']
-    if not files:
-        return None
-
-    filepath = max(files, key=lambda f: f.stat().st_size)
-    return str(filepath)
 
 
 # ===== التحميل عبر gallery-dl =====
@@ -174,15 +129,17 @@ def compress_video(input_path: str, max_size_mb: int = 45):
 
 # ===== التحميل الرئيسي =====
 def download_media(url: str, job_id: str):
-    # إذا الرابط من الموقع المخصص
-    if SITE_NAME.lower() in url.lower():
+    # Pinterest → gallery-dl أولاً (يدعم pin.it)
+    if 'pin.it' in url.lower() or 'pinterest' in url.lower():
         try:
-            filepath = download_with_custom_module(url, job_id)
+            filepath = download_with_gallerydl(url, job_id)
             if filepath:
-                is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.flv'))
+                is_video = filepath.lower().endswith(
+                    ('.mp4', '.mkv', '.webm', '.mov', '.gif')
+                )
                 return filepath, is_video
         except Exception as e:
-            logging.warning(f"custom module failed: {e}")
+            logging.warning(f"gallery-dl (pinterest) failed: {e}")
 
     # 1) جرّب yt-dlp
     try:
@@ -196,7 +153,9 @@ def download_media(url: str, job_id: str):
     try:
         filepath = download_with_gallerydl(url, job_id)
         if filepath:
-            is_video = filepath.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.gif'))
+            is_video = filepath.lower().endswith(
+                ('.mp4', '.mkv', '.webm', '.mov', '.gif')
+            )
             return filepath, is_video
     except Exception as e:
         logging.warning(f"gallery-dl failed: {e}")
