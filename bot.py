@@ -49,6 +49,7 @@ def download_media(url: str, job_id: str):
         'no_warnings': True,
         'noplaylist': True,
         'merge_output_format': 'mp4',
+        'cookiefile': 'x.com_cookies.txt',
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                           'AppleWebKit/537.36 (KHTML, like Gecko) '
