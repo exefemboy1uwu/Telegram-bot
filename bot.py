@@ -42,16 +42,22 @@ def extract_url(text: str):
         return None
     url = match.group(0)
 
-    # نظّف روابط يوتيوب
+    # نظّف روابط يوتيوب من معاملات التتبع
     if 'youtu' in url.lower():
-        # احذف معامل si=
         url = re.sub(r'[?&]si=[^&]*', '', url)
-        # احذف معاملات تتبع أخرى
         url = re.sub(r'[?&]pp=[^&]*', '', url)
         url = re.sub(r'[?&]feature=[^&]*', '', url)
         url = url.rstrip('?&')
 
     return url
+
+
+def get_cookie_file(url: str):
+    """يختار ملف الكوكيز المناسب حسب الموقع"""
+    url_lower = url.lower()
+    if 'youtu' in url_lower:
+        return 'youtube.com_cookies.txt'
+    return 'x.com_cookies.txt'
 
 
 # ===== التحميل عبر yt-dlp =====
@@ -65,7 +71,7 @@ def download_with_ytdlp(url: str, job_id: str):
         'no_warnings': True,
         'noplaylist': True,
         'merge_output_format': 'mp4',
-        'cookiefile': 'x.com_cookies.txt',
+        'cookiefile': get_cookie_file(url),
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                           'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -74,7 +80,6 @@ def download_with_ytdlp(url: str, job_id: str):
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'web'],
-                'skip': ['hls', 'dash'],
             }
         },
         'retries': 3,
@@ -85,7 +90,6 @@ def download_with_ytdlp(url: str, job_id: str):
         info = ydl.extract_info(url, download=True)
         filepath = ydl.prepare_filename(info)
 
-        # إذا لم يوجد الملف بالاسم المتوقع، ابحث عن أي ملف مطابق
         if not os.path.exists(filepath):
             base = os.path.splitext(filepath)[0]
             for ext in ['.mp4', '.mkv', '.webm', '.mov',
@@ -104,7 +108,7 @@ def download_with_gallerydl(url: str, job_id: str):
 
     result = subprocess.run([
         'gallery-dl',
-        '--cookies', 'x.com_cookies.txt',
+        '--cookies', get_cookie_file(url),
         '--dest', str(output_dir),
         url
     ], capture_output=True, text=True, timeout=180)
@@ -112,7 +116,6 @@ def download_with_gallerydl(url: str, job_id: str):
     logging.info(f"gallery-dl output: {result.stdout}")
     logging.error(f"gallery-dl error: {result.stderr}")
 
-    # ابحث عن الملفات في كل المجلدات الفرعية
     files = []
     for f in output_dir.rglob('*'):
         if f.is_file() and f.stat().st_size > 0:
@@ -197,7 +200,7 @@ def download_media(url: str, job_id: str):
         errors.append(f"gallery-dl: {e}")
         logging.warning(f"gallery-dl failed: {e}")
 
-    raise Exception("فشل التحميل بكل الطرق:\n" + "\n".join(errors[:3]))
+    raise Exception("فشل التحميل بكل الطرق:\n" + "\n".join(errors[:2]))
 
 
 # ===== الأوامر =====
